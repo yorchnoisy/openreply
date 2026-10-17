@@ -80,6 +80,7 @@ export async function reconcileComments(): Promise<void> {
       wholeWordMatch: true,
       publicReplyEnabled: true,
       workspaceId: true,
+      createdAt: true,
       instagramAccount: {
         select: {
           id: true,
@@ -98,9 +99,11 @@ export async function reconcileComments(): Promise<void> {
   const tokenCache = new Map<string, InstagramContext | null>();
 
   for (const automation of automations) {
+    // Never backfill comments older than the campaign itself: they were left
+    // before it existed, often already answered by another tool.
     const stat = await sweepCampaign({
       automation: automation,
-      sinceMs: sinceMs,
+      sinceMs: Math.max(sinceMs, automation.createdAt.getTime()),
       tokenCache: tokenCache,
     }).catch(
       (error): SweepStat => ({

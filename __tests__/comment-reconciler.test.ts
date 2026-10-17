@@ -90,6 +90,7 @@ describe("comment polling does not recreate unsafe sends", () => {
         matchAnyWord: false,
         keywords: ["AI"],
         publicReplyEnabled: true,
+        createdAt: new Date(0),
         instagramAccount: {
           id: "connection",
           instagramId: "owner",
