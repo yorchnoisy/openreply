@@ -39,7 +39,14 @@ import {
   type InstagramContext,
 } from "@/lib/instagram/provider";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
-import { reserveDMSlot, releaseDMSlot } from "@/lib/utils/rate-limiter";
+import { reserveDMSlot, releaseDMSlot, DM_MIN_GAP_MS } from "@/lib/utils/rate-limiter";
+
+const POLL_ONLY_AUTOMATIONS = new Set(
+  (process.env.POLL_ONLY_AUTOMATIONS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+);
 import {
   releaseWorkspaceDMReservation,
   reserveWorkspaceDMSend,
@@ -321,6 +328,13 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
   });
 
   for (const automation of automations) {
+    // Campaigns listed in POLL_ONLY_AUTOMATIONS ignore live webhook comments;
+    // the polling sweep picks them up oldest first instead. Used to drain a
+    // backlog in order after Instagram throttled a viral post.
+    if (job.data.source !== "POLLING" && POLL_ONLY_AUTOMATIONS.has(automation.id)) {
+      continue;
+    }
+
     // "Any word" campaigns fire on every comment; otherwise require a keyword hit.
     const matchResult = automation.matchAnyWord
       ? { matched: true, matchedKeyword: null }
@@ -590,6 +604,24 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             errorMessage: "Hourly Instagram DM rate limit reached",
           },
         });
+        continue;
+      }
+
+      if (rateLimit.spacingWaitMs) {
+        // Only waiting for the gap between sends: retry once it opens, with
+        // jitter so queued comments don't all wake at the same instant. It
+        // does not spend the hourly-cap requeue budget.
+        const spacingWaits = (job.data.spacingWaits ?? 0) + 1;
+        await getDMQueue().add(
+          "process-comment",
+          { ...job.data, spacingWaits },
+          {
+            delay:
+              rateLimit.spacingWaitMs +
+              Math.floor(Math.random() * Math.max(DM_MIN_GAP_MS, 1000) * 3),
+            jobId: `comment_${instagramAccountId}_${commentId}_gap_${requeueAttempt}_${spacingWaits}`,
+          }
+        );
         continue;
       }
 

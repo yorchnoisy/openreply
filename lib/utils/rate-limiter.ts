@@ -21,6 +21,10 @@ import Redis from "ioredis";
 // DM_RATE_LIMIT_PER_HOUR lets an instance run under the documented cap.
 const RATE_LIMIT_MAX = Number(process.env.DM_RATE_LIMIT_PER_HOUR) || 750;
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
+// Minimum spacing between two comment DMs on one account. Instagram reacts to
+// bursts, not only to hourly totals, so sends are spread out evenly. The gap
+// is never handed back on a failed send, which also paces failing attempts.
+const DM_MIN_GAP_MS = Number(process.env.DM_MIN_GAP_SECONDS ?? 0) * 1000;
 const REQUEUE_DELAY_MS = 30 * 60 * 1000; // 30 minutes
 // A lower hourly cap needs more requeues, or a viral post's overflow is
 // skipped after 90 minutes instead of waiting its turn.
@@ -39,6 +43,8 @@ function getRedis(): Redis {
 
 export interface RateLimitResult {
   allowed: boolean;
+  /** Blocked only by the spacing between sends, not by the hourly cap. */
+  spacingWaitMs?: number;
   currentCount: number;
   remainingDMs: number;
   shouldRequeue: boolean;
@@ -51,17 +57,28 @@ const RESERVE_DM_SLOT_SCRIPT = `
 local current = tonumber(redis.call("GET", KEYS[1]) or "0")
 local max = tonumber(ARGV[1])
 local ttl = tonumber(ARGV[2])
+local gap = tonumber(ARGV[3])
+
+if gap > 0 then
+  local wait = redis.call("PTTL", KEYS[2])
+  if wait > 0 then
+    return {0, current, max - current, wait}
+  end
+end
 
 if current >= max then
-  return {0, current, 0}
+  return {0, current, 0, 0}
 end
 
 local next_count = redis.call("INCR", KEYS[1])
 if next_count == 1 then
   redis.call("EXPIRE", KEYS[1], ttl)
 end
+if gap > 0 then
+  redis.call("SET", KEYS[2], "1", "PX", gap)
+end
 
-return {1, next_count, max - next_count}
+return {1, next_count, max - next_count, 0}
 `;
 
 function toScriptNumber(value: unknown): number {
@@ -168,15 +185,31 @@ export async function reserveDMSlot(
 
   const result = await client.eval(
     RESERVE_DM_SLOT_SCRIPT,
-    1,
+    2,
     key,
+    `rate:dm:gap:${instagramAccountId}`,
     RATE_LIMIT_MAX,
-    RATE_LIMIT_WINDOW
+    RATE_LIMIT_WINDOW,
+    DM_MIN_GAP_MS
   );
   const values = Array.isArray(result) ? result : [];
   const allowedFlag = toScriptNumber(values[0]);
   const count = toScriptNumber(values[1]);
   const remaining = toScriptNumber(values[2]);
+  const spacingWait = toScriptNumber(values[3]);
+
+  if (allowedFlag !== 1 && spacingWait > 0) {
+    return {
+      allowed: false,
+      spacingWaitMs: spacingWait,
+      currentCount: count,
+      remainingDMs: remaining,
+      shouldRequeue: true,
+      requeueDelayMs: spacingWait,
+      shouldSkip: false,
+      reserved: false,
+    };
+  }
 
   if (allowedFlag !== 1) {
     return blockedResult(count, requeueAttempt);
@@ -256,4 +289,4 @@ export async function resetRateLimit(
 }
 
 // Export constants for use in tests
-export { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW, REQUEUE_DELAY_MS, MAX_REQUEUE_ATTEMPTS };
+export { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW, DM_MIN_GAP_MS, REQUEUE_DELAY_MS, MAX_REQUEUE_ATTEMPTS };

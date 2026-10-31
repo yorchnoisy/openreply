@@ -94,15 +94,29 @@ describe("reserveDMSlot", () => {
 
     expect(mockEval).toHaveBeenCalledWith(
       expect.any(String),
-      1,
+      2,
       "rate:dm:account_123",
+      "rate:dm:gap:account_123",
       RATE_LIMIT_MAX,
-      3600
+      3600,
+      expect.any(Number)
     );
     expect(result.allowed).toBe(true);
     expect(result.reserved).toBe(true);
     expect(result.currentCount).toBe(51);
     expect(result.remainingDMs).toBe(139);
+  });
+
+  it("should wait for the gap between sends without spending the requeue budget", async () => {
+    mockEval.mockResolvedValue([0, 10, 90, 12000]);
+
+    const result = await reserveDMSlot("account_123", 0);
+
+    expect(result.allowed).toBe(false);
+    expect(result.spacingWaitMs).toBe(12000);
+    expect(result.shouldRequeue).toBe(true);
+    expect(result.shouldSkip).toBe(false);
+    expect(result.requeueDelayMs).toBe(12000);
   });
 
   it("should recommend requeue when the atomic reserve is denied", async () => {

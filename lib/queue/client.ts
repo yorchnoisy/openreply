@@ -34,6 +34,8 @@ export interface ProcessCommentJob {
   // from. Campaigns are bound to that post, so both ids have to be matched.
   originalMediaId?: string;
   requeueAttempt?: number;
+  // How many times this comment waited for the gap between sends.
+  spacingWaits?: number;
   // Which path enqueued this comment. It is not copied to ProcessedComment or
   // used for reconciliation dedup.
   source?: CommentSource;
