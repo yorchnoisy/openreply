@@ -140,8 +140,8 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
         where: {
           commenterId: event.userId,
           status: "SENT",
+          // Paused campaigns still finish conversations already open.
           automation: {
-            isActive: true,
             openingDmEnabled: true,
             instagramAccount: {
               instagramId: event.instagramAccountId,

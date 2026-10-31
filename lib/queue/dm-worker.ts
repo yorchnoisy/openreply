@@ -897,8 +897,12 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     .split(":");
   const fromOpeningDm = marker === "open";
 
+  // No isActive filter: pausing a campaign stops it from opening new
+  // conversations, but someone who already got its opening DM and taps the
+  // button still gets the next step. Pausing during an Instagram DM throttle
+  // relies on this, since in-thread replies keep working when new ones fail.
   const automation = await prisma.automation.findFirst({
-    where: { id: automationId, isActive: true, ...connectionScope(job.data) },
+    where: { id: automationId, ...connectionScope(job.data) },
     include: {
       instagramAccount: true,
       workspace: true,
@@ -1225,8 +1229,10 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   const { instagramAccountId, userId, automationId, commenterName } = job.data;
 
+  // Like postbacks, a follow-up finishes a conversation already open, so it is
+  // sent even if the campaign was paused after the link went out.
   const automation = await prisma.automation.findFirst({
-    where: { id: automationId, isActive: true, ...connectionScope(job.data) },
+    where: { id: automationId, ...connectionScope(job.data) },
     include: { instagramAccount: true },
   });
 
