@@ -47,6 +47,9 @@ const LOOKBACK_HOURS = Number(process.env.COMMENT_POLL_LOOKBACK_HOURS ?? 72);
 // Hard cap on how many new comments a single campaign can enqueue per sweep, so
 // a viral post drains gradually instead of bursting into the comment API.
 const MAX_NEW_PER_SWEEP = Number(process.env.COMMENT_POLL_MAX_PER_SWEEP ?? 30);
+// How many of a post's newest comments one sweep reads. On a viral post the
+// default 800 can push older unanswered comments out of view.
+const MAX_COMMENTS_READ = Number(process.env.COMMENT_POLL_MAX_COMMENTS ?? 800);
 // For "any post" campaigns, how many recent posts to scan.
 const RECENT_MEDIA_LIMIT = 10;
 
@@ -201,6 +204,7 @@ async function sweepCampaign({
         context: accessToken,
         mediaId: mediaId,
         sinceMs: sinceMs,
+        max: MAX_COMMENTS_READ,
       });
     } catch (error) {
       stat.errors.push(`Comments ${mediaId}: ${errMessage(error)}`);
