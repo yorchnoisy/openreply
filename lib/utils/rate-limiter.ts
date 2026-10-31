@@ -16,10 +16,15 @@
 
 import Redis from "ioredis";
 
-const RATE_LIMIT_MAX = 750; // private replies per hour, per Meta's documented cap
+// Meta documents 750 private replies per hour, but Instagram's spam filter can
+// start refusing DMs well below that after a burst (seen at ~1,000 in a day).
+// DM_RATE_LIMIT_PER_HOUR lets an instance run under the documented cap.
+const RATE_LIMIT_MAX = Number(process.env.DM_RATE_LIMIT_PER_HOUR) || 750;
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
 const REQUEUE_DELAY_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_REQUEUE_ATTEMPTS = 3;
+// A lower hourly cap needs more requeues, or a viral post's overflow is
+// skipped after 90 minutes instead of waiting its turn.
+const MAX_REQUEUE_ATTEMPTS = Number(process.env.DM_RATE_LIMIT_MAX_REQUEUES) || 3;
 
 let redis: Redis | null = null;
 
